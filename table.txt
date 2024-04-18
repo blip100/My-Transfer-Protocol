@@ -1,0 +1,10 @@
+send_cnt: 340 ==== recv_cnt: 328 === P: 0.050000 
+send_cnt: 344 ==== recv_cnt: 338 === P: 0.100000 
+send_cnt: 378 ==== recv_cnt: 372 === P: 0.150000 
+send_cnt: 382 ==== recv_cnt: 376 === P: 0.200000 
+send_cnt: 417 ==== recv_cnt: 412 === P: 0.250000 
+send_cnt: 492 ==== recv_cnt: 486 === P: 0.300000 
+send_cnt: 502 ==== recv_cnt: 496 === P: 0.350000 
+send_cnt: 624 ==== recv_cnt: 618 === P: 0.400000 
+send_cnt: 654 ==== recv_cnt: 648 === P: 0.450000 
+send_cnt: 705 ==== recv_cnt: 699 === P: 0.500000 

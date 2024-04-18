@@ -1,0 +1,194 @@
+				************************** IMPLEMENTING MTP USING UDP **********************************
+							21CS10006 - Anuguru Parthiv Reddy
+							21CS10028 - Gummadi Vikhyath
+				   **************************************************************************
+
+Drop Statistics
+~~~~~~~~~~~~~~~~
+
+The commented portion inside main thread of init.c was used to populate this table. Each time the DROP_PROBABILITY hash define will be changed and program will be run populating the table.txt with corresponding transmissions involved (data + ack). We are calculating both send_count and recv_count and we will take minimum of them since we talking about the transmissions. The mismatch in their count is because of dropped and repeated messages sent after time out by sender.
+
+	TRANSMISSION COUNTS PER 100Kb(user1->user2)      DROP PROBABILITY
+	--------------------------------------------------------------------
+	send_cnt: 340 ==== recv_cnt: 328 		| P: 0.050000 
+	send_cnt: 344 ==== recv_cnt: 338 		| P: 0.100000 
+	send_cnt: 378 ==== recv_cnt: 372 		| P: 0.150000 
+	send_cnt: 382 ==== recv_cnt: 376 		| P: 0.200000 
+	send_cnt: 417 ==== recv_cnt: 412 		| P: 0.250000 
+	send_cnt: 492 ==== recv_cnt: 486 		| P: 0.300000 
+	send_cnt: 502 ==== recv_cnt: 496 		| P: 0.350000 
+	send_cnt: 624 ==== recv_cnt: 618 		| P: 0.400000 
+	send_cnt: 654 ==== recv_cnt: 648 		| P: 0.450000 
+	send_cnt: 705 ==== recv_cnt: 699 		| P: 0.500000 
+
+
+Testing: 
+    For testing for 2 users:
+        - Run the init process {make run}
+        - (user1.c<->user2.c) === make run1 and make run2
+        - msg from user1.c to user2.c is of the form (A: int)
+        - msg from user2.c to user1.c is of the form (B: int)
+        - 100 such msgs of size 1024bytes are communicated and we can confirm reliability and inorder msgs (the format of data comes handy here)
+        - As both m_sendto and m_recvfrom are non_blocking sleep is used when they fail. 
+        - As success from m_sendto does not guarantee that the message is sent to the other end, m_close cannot be called until both user programs recieve everything and ask for exit.
+
+    For testing for 4 users. 
+	- communication: 
+		(user1.c<->user2.c) === make run1 and make run2 
+		(user3.c<->user4.c) === make run3 and make run4
+
+Structures Used:
+
+    1) SOCK_INFO;
+        - Aim: to communicated between main thread of initmsocket.c and msocket.c so that the sockets created in init are closed and maintained in init
+        - It contains the following fields:
+            - sockid: The socket id of the socket.
+            - ip: The ip address of the socket.
+            - op: tells the main thread what operation to perform
+            		- CREATE_SOCKET(0) will inform M thread to create the socket
+            		- BIND_SOCKET and CLOSE_SOCKET work on similar logic
+            - port: The port number of the socket.
+            - error_no: The error number of the socket.
+            
+
+    2) msg
+       -Aim: to make headers and data handling simpler to follow.
+    		-seq_no: what is the seq_no msg inside of sbuff block always increasing we %16 when transmitting.
+    		-data: what is data of this sbuff block it is always better to initialize the data with 0 when you are starting
+    		ther do the following as mentioned in page no 221 of keith ross.
+        	
+    3)wnd
+    	Although same data struct is used for both sender and receiver serves different purposes based on needs.
+    	>swnd:
+    		[base,next) contain msgs already sent from sbuff 
+    		[next,base+SWND) contain msgs to be sent from sbuff
+    		ptr is cur pointer in sbuff where if user calls msendto the data will be written 
+    		-initialisation:
+    			base = 1
+    			next = 1
+    			 ptr = 1 done inside m_socket
+    		-update:
+    			base: when receiver thread gets message of A_TYPE i.e ack then 
+    				if seq.no recved is out of window don't care
+    				else if it's position matches with some k inside swnd then try to expand the swnd's right end to k+1+rwnd_sz
+    			next: when sender thread sends the new messages(not duplicates) increases by 1
+    			 ptr: updated after every msendto() call by 1
+    		
+    	>rwnd:
+    		base - pointer from where application reads the data
+    		next - pointer to next expected message
+    		-initialisation:
+    			base = 1
+    			next = 1
+    			ptr  = 1
+    		-update:
+    			base: when application reads from the recv_buff 
+    			next: if msg recved is of M_TYPE i.e data then we'll try to update next
+    		
+        
+    4) struct mtp_sock;(shared memory between msocket.c and inimsocket.c)
+        - This structure is used to store the information of the socket.
+            - state: The state of the socket {0:FREE, 1:ALLOCATED, 2:BOUND}
+            - pid: The process id of the socket.
+            - sockid: The udp_socket id of the mtp_sock.
+            - remoteaddr: The remote address that the socket is connected to.
+            - myaddr: The address of the socket.
+            - send_buff: The send buffer of the socket.
+            - recv_buff: The receive buffer of the socket.
+            - swnd : contains base and next of swnd
+            - rwnd : pointer on rbuff from where mtp scoket can read data  and next expected message 
+           
+
+Functions:
+    1) m_socket:
+        - This function is used to create a socket.
+        - It takes the following arguments:
+            - domain: The domain of the socket.
+            - type: The type of the socket.
+            - protocol: The protocol of the socket.
+        - It returns the mtp socket id of the socket created.
+        - It initializes the send buffer and receive buffer of the socket. 
+        - It initializes the sender window and receiver window of the socket.
+        - It initializes the state of the socket as ALLOCATED.
+        - It initializes the pid of the socket as the process id of the process that created the socket.
+        - It returns the socket id of the socket created.
+
+    2) m_bind:
+        - This function is used to bind the socket to the address.
+        - It takes the following arguments:
+            - sockid: The mtp socket id of the socket.
+            - addr: The address to bind the socket to.
+        - It initializes the myaddr field of the socket with the address passed.
+        - It initializes the state of the socket as BOUND.
+        - It returns 0 on success and -1 on failure.
+
+    3) m_sendto:
+        - This function is used to send the message to the remote address.
+        - It sends the message to the remote address if the remote address is same as the remote_address the socket is bound to.
+        - It fails if it is not the same remote address.
+        - It returns the number of bytes sent.
+
+    4) m_recvfrom:
+        - This function is used to receive the next inorder message from the remote address.
+        - It receives the message from the remote address if the remote address is same as the remote_address the socket is bound to.
+        - It fails if it is not the same remote address.
+        - It returns the number of bytes received.
+
+    5) m_close:
+        - This function is used to close the socket.
+        - It takes the following arguments:
+            - sockid: The mtp socket id of the socket.
+        - It frees the socket and sets the state of the socket as FREE.
+        - It calls the init process to free the underlying udp socket.
+        - It returns 0 on success and -1 on failure.
+
+
+    
+
+
+    ----- initmsocket.c--------
+
+    6) add_header:
+        - This function is used to create a mtp header.
+        - It takes the following arguments:
+            - type: The type of the message {0:DATA, 1:ACK}
+            - seq: The sequence number.
+            - recv_window: The size of the receiver window.
+        - It returns the MTP header, which is bitwise encoded into a single byte, compactly representing the message type, sequence number, and receiver window size.
+    	- Example: Taking these para type: DATA (0) , seq: 6 , recv_window: 5
+    		> First constructing the header :
+    			* Encoding type: Since the type is DATA (0), it occupies the most significant bit (bit 7). So, we shift 0 left by 7 bits, resulting in 0
+    			* Encoding seq: The sequence number 6 is represented in binary as 110. To place it in the header, we shift it left by 3 bits to occupy bits 
+    			  4,5and 6. So, after shifting, it becomes 110000.
+    			* Encoding recv_window: The receiver window size 5 is represented in binary as 101. Since it doesn't need shifting, it directly occupies bits 
+    			  0,1, and 2.
+    		> Combining the encoded values:
+    			* The bitwise OR operation combines the encoded values:
+    			* type (0) | seq (110000) | recv_window (101)
+    	
+    	
+    7) strip_header:
+        - This function is used to extract the details from the mtp header and store them in referenced arguments.
+        - It takes the following arguments:
+            - header: The mtp header.
+            - referenes for type, seq, recv_window.
+        - Using this function we extract the type , seq , recv_window from the header . In the add header we combined these three parameters into header, here we 
+          divide it again into parameters. 
+    
+    
+    8) m_unlink:
+    	- The unlink function is a system call used to remove a named semaphore from the system.
+    	- Unlinking a semaphore removes it from the semaphore namespace, rendering it inaccessible to other processes.
+    	- While unlinking doesn't affect existing references to the semaphore, once all references are closed, the semaphore's resources are deallocated.
+    	- In the context of semaphores.h, unlink pertains to deleting semaphores defined or declared within this header file.
+    	- This function is essential for managing semaphore resources and preventing resource leaks within a system utilizing semaphores for synchronization and 
+    	  communication among processes.
+    9) send_msg and recv_msg
+    	given a socket they recv data from that mtp socket i by finding the corresponding udp socket using the shared memory.
+    10) dropMessage:
+        - This function is used to simulate unreliable network by dropping the message on receiver side.
+        - Takes DROP_PROBABILITY as input
+        - It returns 1 if the message is dropped and 0 otherwise.
+        
+    11) print_... : generic debugging functions
+    
